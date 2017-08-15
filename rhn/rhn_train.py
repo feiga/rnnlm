@@ -14,7 +14,7 @@ import tensorflow as tf
 
 from sacred import Experiment
 from rhn import Model
-from data.reader import data_iterator
+from reader import data_iterator
 
 ex = Experiment('rhn_prediction')
 logging = tf.logging
@@ -144,13 +144,13 @@ def get_config(_config):
 
 def get_data(data_path, dataset):
   if dataset == 'ptb':
-    import reader
+    import ptb_reader as reader
     raw_data = reader.ptb_raw_data(data_path)
   elif dataset == 'enwik8':
-    from data import reader
+    import reader
     raw_data = reader.enwik8_raw_data(data_path)
   elif dataset == 'text8':
-    from data import reader
+    import reader
     raw_data = reader.text8_raw_data(data_path)
   return reader, raw_data
 
