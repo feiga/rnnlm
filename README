@@ -1,7 +1,13 @@
 Run
 
-```
+'''
 CUDA_VISIBLE_DEVICES='0' python lstm/ptb_word_lm.py
-```
+'''
 
-for quick start.
+for 2-layer lstm. Code from https://github.com/tensorflow/models/tree/master/tutorials/rnn/ptb
+
+Run 
+'''
+CUDA_VISIBLE_DEVICES='0' python rhn/rhn_train.py with ptb_sota
+'''
+for Recurrent Highway Networks. Code from https://github.com/julian121266/RecurrentHighwayNetworks
