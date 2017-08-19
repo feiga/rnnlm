@@ -84,7 +84,7 @@ flags.DEFINE_bool("resnet", False, "Add residual connection or not")
 flags.DEFINE_bool("shuffle", True, "Add shuffle unit or not")
 flags.DEFINE_bool("vdrop", False, "Using variational dropout or not")
 flags.DEFINE_float("dropout", 0.35, "Dropout rate")
-flags.DEFINE_float("hdropout", 0.75, "Dropout rate")
+flags.DEFINE_float("hdropout", 0.35, "Dropout rate")
 flags.DEFINE_bool("tied", False,
                   "Tie the input and output embedding with same weight")
 flags.DEFINE_integer("layers", 2, "Number of layers for stack lstm")
