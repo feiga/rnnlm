@@ -64,8 +64,8 @@ import tensorflow as tf
 
 import reader
 
-from group_lstm_cell import MyLSTMCell, GroupLSTMCell
-#from variational_dropout_wrapper import VariationalDropoutWrapper
+from group_lstm_cell import MyLSTMCell, GroupLSTMCell, VariationalDropoutWrapper
+#from variational_dropout_wrapper import 
 
 flags = tf.flags
 logging = tf.logging
@@ -83,7 +83,8 @@ flags.DEFINE_integer("group_num", 1, "Group Number when using Group Recurrent")
 flags.DEFINE_bool("resnet", False, "Add residual connection or not")
 flags.DEFINE_bool("shuffle", True, "Add shuffle unit or not")
 flags.DEFINE_bool("vdrop", False, "Using variational dropout or not")
-flags.DEFINE_float("dropout", 0.2, "Dropout rate")
+flags.DEFINE_float("dropout", 0.35, "Dropout rate")
+flags.DEFINE_float("hdropout", 0.75, "Dropout rate")
 flags.DEFINE_bool("tied", False,
                   "Tie the input and output embedding with same weight")
 flags.DEFINE_integer("layers", 2, "Number of layers for stack lstm")
@@ -145,14 +146,13 @@ class PTBModel(object):
     if is_training and config.keep_prob < 1:
       def attn_cell():
         if FLAGS.vdrop:
-          #return VariationalDropoutWrapper(lstm_cell(), 
-          #        batch_size, config.keep_prob)
-          return tf.contrib.rnn.DropoutWrapper(lstm_cell(),
-                  state_keep_prob=0.75,
-                  output_keep_prob=config.keep_prob,
-                  variational_recurrent=True,
-                  #input_size=batch_size,
-                  dtype=data_type())
+          return VariationalDropoutWrapper(lstm_cell(), batch_size, size)
+          #return tf.contrib.rnn.DropoutWrapper(lstm_cell(),
+          #        state_keep_prob=0.75,
+          #        output_keep_prob=config.keep_prob,
+          #        variational_recurrent=True,
+          #        #input_size=batch_size,
+          #        dtype=data_type())
         else:
           return tf.contrib.rnn.DropoutWrapper(lstm_cell(), 
                         output_keep_prob=config.keep_prob)
@@ -171,7 +171,7 @@ class PTBModel(object):
           "embedding", [vocab_size, size], dtype=data_type())
       inputs = tf.nn.embedding_lookup(embedding, input_.input_data)
 
-    if is_training and config.keep_prob < 1:
+    if is_training and config.keep_prob < 1 and not FLAGS.vdrop:
       inputs = tf.nn.dropout(inputs, config.keep_prob)
 
     # Simplified version of models/tutorials/rnn/rnn.py's rnn().
@@ -201,6 +201,9 @@ class PTBModel(object):
       softmax_w = tf.get_variable(
         "softmax_w", [size, vocab_size], dtype=data_type())
     softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=data_type())
+
+    if is_training and config.keep_prob < 1 and FLAGS.vdrop:
+      output = tf.nn.dropout(output, config.keep_prob)
     logits = tf.matmul(output, softmax_w) + softmax_b
 
     # Reshape logits to be 3-D tensor for sequence loss
@@ -309,6 +312,8 @@ class LargeConfig(object):
   lr_decay = 1 / 4#1.5
   batch_size = 20
   vocab_size = 10000
+  keep_i = 0.35
+  keep_h = 0.35
 
 
 class TestConfig(object):
@@ -326,13 +331,27 @@ class TestConfig(object):
   batch_size = 20
   vocab_size = 10000
 
+def get_noise(batch_size, hidden_size, keep_i, keep_h):
+  if keep_i < 1.0:
+    noise_i = (np.random.random_sample((batch_size, hidden_size)) < keep_i).astype(np.float32) / keep_i
+  else:
+    noise_i = np.ones((batch_size, hidden_size), dtype=np.float32)
+  if keep_h < 1.0:
+    noise_h = (np.random.random_sample((batch_size, hidden_size)) < keep_h).astype(np.float32) / keep_h
+  else:
+    noise_h = np.ones((batch_size, hidden_size), dtype=np.float32)
+  return noise_i, noise_h
 
-def run_epoch(session, model, eval_op=None, verbose=False):
+def run_epoch(session, model, config, is_training=True, eval_op=None, verbose=False):
   """Runs the model on the given data."""
   start_time = time.time()
   costs = 0.0
   iters = 0
-  state = session.run(model.initial_state)
+  feed_dict={}
+  if is_training:
+    for i, [(c, h), n_i, n_h] in enumerate(model.initial_state):
+      feed_dict[n_i], feed_dict[n_h] = get_noise(config.batch_size, config.hidden_size, config.keep_i, config.keep_h)
+  state = session.run(model.initial_state,feed_dict)
 
   fetches = {
       "cost": model.cost,
@@ -343,9 +362,15 @@ def run_epoch(session, model, eval_op=None, verbose=False):
 
   for step in range(model.input.epoch_size):
     feed_dict = {}
-    for i, (c, h) in enumerate(model.initial_state):
-      feed_dict[c] = state[i].c
-      feed_dict[h] = state[i].h
+    if not is_training:
+      for i, (c, h) in enumerate(model.initial_state):
+        feed_dict[c] = state[i].c
+        feed_dict[h] = state[i].h
+    else:
+      for i, [(c, h), n_i, n_h] in enumerate(model.initial_state):
+        feed_dict[c] = state[i][0].c
+        feed_dict[h] = state[i][0].h
+        feed_dict[n_i], feed_dict[n_h] = get_noise(config.batch_size, config.hidden_size, config.keep_i, config.keep_h)
 
     vals = session.run(fetches, feed_dict)
     cost = vals["cost"]
@@ -387,6 +412,8 @@ def main(_):
   config.num_layers = FLAGS.layers
   config.hidden_size = FLAGS.dim
   config.keep_prob = FLAGS.dropout
+  config.keep_i = FLAGS.dropout
+  config.keep_h = FLAGS.hdropout
   eval_config = get_config()
   eval_config.num_layers = FLAGS.layers
   eval_config.hidden_size = FLAGS.dim
@@ -430,10 +457,10 @@ def main(_):
         m.assign_lr(session, curr_lr) #config.learning_rate * lr_decay)
 
         print("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(m.lr)))
-        train_perplexity = run_epoch(session, m, eval_op=m.train_op,
+        train_perplexity = run_epoch(session, m, config, True, eval_op=m.train_op,
                                      verbose=True)
         print("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
-        valid_perplexity = run_epoch(session, mvalid)
+        valid_perplexity = run_epoch(session, mvalid, config, False)
         print("Epoch: %d Valid Perplexity: %.3f" % (i + 1, valid_perplexity))
         last_valid = curr_valid
         curr_valid = valid_perplexity
@@ -445,7 +472,7 @@ def main(_):
             sv.saver.save(session, FLAGS.save_path, global_step=sv.global_step)
 
 
-        test_perplexity = run_epoch(session, mtest)
+        test_perplexity = run_epoch(session, mtest, eval_config, False)
         print("Test Perplexity: %.3f" % test_perplexity)
 
 
