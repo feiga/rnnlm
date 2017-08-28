@@ -57,6 +57,8 @@ def hyperparameters():
   else:
     raise AssertionError("Unsupported dataset! Only 'ptb',",
                          "'enwik8' and 'text8' are currently supported.")
+  group_num=1
+  shuffle=False
 
 
 @ex.named_config
@@ -82,7 +84,62 @@ def ptb_sota():
   drop_o = 0.75
   tied = True
   vocab_size = 10000
+  group_num=1
+  shuffle=False
 
+@ex.named_config
+def ptb_group_sota():
+  data_path = 'data'
+  dataset = 'ptb'
+  init_scale = 0.04
+  init_bias = -2.0
+  num_layers = 1
+  depth = 10
+  learning_rate = 0.2
+  lr_decay = 1.02
+  weight_decay = 1e-7
+  max_grad_norm = 10
+  num_steps = 35
+  hidden_size = 830
+  max_epoch = 20
+  group_num=2
+  shuffle=True
+
+@ex.named_config
+def ptb_group_noshuffle_sota():
+  data_path = 'data'
+  dataset = 'ptb'
+  init_scale = 0.04
+  init_bias = -2.0
+  num_layers = 1
+  depth = 10
+  learning_rate = 0.2
+  lr_decay = 1.02
+  weight_decay = 1e-7
+  max_grad_norm = 10
+  num_steps = 35
+  hidden_size = 830
+  max_epoch = 20
+  group_num=2
+  shuffle=False
+
+@ex.named_config
+def ptb_4_group_sota():
+  data_path = 'data'
+  dataset = 'ptb'
+  init_scale = 0.04
+  init_bias = -2.0
+  num_layers = 1
+  depth = 10
+  learning_rate = 0.2
+  lr_decay = 1.02
+  weight_decay = 1e-7
+  max_grad_norm = 10
+  num_steps = 35
+  hidden_size = 800 #830
+  max_epoch = 20
+  group_num=4
+  shuffle=True
 
 @ex.named_config
 def enwik8_sota():
@@ -108,6 +165,8 @@ def enwik8_sota():
   drop_o = 0.40
   tied = False
   vocab_size = 205
+  group_num=1
+  shuffle=False
 
 @ex.named_config
 def text8_sota():
@@ -133,6 +192,8 @@ def text8_sota():
   drop_o = 0.40
   tied = False
   vocab_size = 27
+  group_num=1
+  shuffle=False
 
 
 @ex.capture
