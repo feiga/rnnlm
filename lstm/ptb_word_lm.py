@@ -227,6 +227,15 @@ class PTBModel(object):
 
     self._lr = tf.Variable(0.0, trainable=False)
     tvars = tf.trainable_variables()
+
+    nvars = np.prod(tvars[0].get_shape().as_list())
+    print(tvars[0].name, tvars[0].get_shape().as_list())
+    for var in tvars[1:]:
+      sh = var.get_shape().as_list()
+      print(var.name, sh)
+      nvars += np.prod(sh)
+    print(nvars, 'total variables')
+
     grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
                                       config.max_grad_norm)
     optimizer = tf.train.GradientDescentOptimizer(self._lr)
