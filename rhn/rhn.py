@@ -42,7 +42,7 @@ class Model(object):
     self._final_state = [0] * self.num_layers
     for l in range(config.num_layers):
       with tf.variable_scope('RHN' + str(l)):
-        cell = RHNCell(size, in_size, is_training, depth=depth, forget_bias=config.init_bias)
+        cell = RHNCell(size, in_size, is_training, depth=depth, forget_bias=config.init_bias, group_num=config.group_num, shuffle=config.shuffle)
         self._initial_state[l] = cell.zero_state(batch_size, tf.float32)
         state[l] = [self._initial_state[l], self._noise_i[:, :, l], self._noise_h[:, :, l]]
         for time_step in range(num_steps):
@@ -144,12 +144,17 @@ class RHNCell(RNNCell):
   Reference: https://arxiv.org/abs/1607.03474
   """
 
-  def __init__(self, num_units, in_size, is_training, depth=3, forget_bias=None):
+  def __init__(self, num_units, in_size, is_training, depth=3, forget_bias=None, group_num=1, shuffle=False):
     self._num_units = num_units
     self._in_size = in_size
     self.is_training = is_training
     self.depth = depth
     self.forget_bias = forget_bias
+    self.group_num = group_num
+    self.linear = linear
+    self.shuffle = shuffle
+    if self.group_num > 1:
+      self.linear = multilinear
 
   @property
   def input_size(self):
@@ -170,20 +175,20 @@ class RHNCell(RNNCell):
     for i in range(self.depth):
       with tf.variable_scope('h_'+str(i)):
         if i == 0:
-          h = tf.tanh(linear([inputs * noise_i, current_state * noise_h], self._num_units, True))
+          h = tf.tanh(self.linear([inputs * noise_i, current_state * noise_h], self._num_units, True, group_num=self.group_num, shuffle=self.shuffle))
         else:
-          h = tf.tanh(linear([current_state * noise_h], self._num_units, True))
+          h = tf.tanh(self.linear([current_state * noise_h], self._num_units, True, group_num=self.group_num, shuffle=self.shuffle))
       with tf.variable_scope('t_'+str(i)):
         if i == 0:
-          t = tf.sigmoid(linear([inputs * noise_i, current_state * noise_h], self._num_units, True, self.forget_bias))
+          t = tf.sigmoid(self.linear([inputs * noise_i, current_state * noise_h], self._num_units, True, self.forget_bias, group_num=self.group_num, shuffle=self.shuffle))
         else:
-          t = tf.sigmoid(linear([current_state * noise_h], self._num_units, True, self.forget_bias))
+          t = tf.sigmoid(self.linear([current_state * noise_h], self._num_units, True, self.forget_bias, group_num=self.group_num, shuffle=self.shuffle))
       current_state = (h - current_state)* t + current_state
 
     return current_state, [current_state, noise_i, noise_h]
 
 
-def linear(args, output_size, bias, bias_start=None, scope=None):
+def linear(args, output_size, bias, bias_start=None, group_num=1, shuffle=False, scope=None):
   """
   This is a slightly modified version of _linear used by Tensorflow rnn.
   The only change is that we have allowed bias_start=None.
@@ -230,6 +235,73 @@ def linear(args, output_size, bias, bias_start=None, scope=None):
       res = math_ops.matmul(args[0], matrix)
     else:
       res = math_ops.matmul(array_ops.concat(args, 1), matrix)
+    if not bias:
+      return res
+    elif bias_start is None:
+      bias_term = vs.get_variable("Bias", [output_size], dtype=dtype)
+    else:
+      bias_term = vs.get_variable("Bias", [output_size], dtype=dtype,
+                                  initializer=tf.constant_initializer(bias_start, dtype=dtype))
+  return res + bias_term
+
+def multilinear(args, output_size, bias, bias_start=None, group_num=2, shuffle=True, scope=None):
+  """
+  This is a slightly modified version of _linear used by Tensorflow rnn.
+  The only change is that we have allowed bias_start=None.
+
+  Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+
+  Args:
+    args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+    output_size: int, second dimension of W[i].
+    bias: boolean, whether to add a bias term or not.
+    bias_start: starting value to initialize the bias; 0 by default.
+    scope: VariableScope for the created subgraph; defaults to "Linear".
+
+  Returns:
+    A 2D Tensor with shape [batch x output_size] equal to
+    sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  """
+  if args is None or (nest.is_sequence(args) and not args):
+    raise ValueError("`args` must be specified")
+  if not nest.is_sequence(args):
+    args = [args]
+
+  # Calculate the total size of arguments on dimension 1.
+  total_arg_size = 0
+  shapes = [a.get_shape().as_list() for a in args]
+  batch_size = shapes[0][0]
+  for shape in shapes:
+    if len(shape) != 2:
+      raise ValueError("Linear is expecting 2D arguments: %s" % str(shapes))
+    if not shape[1]:
+      raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
+    else:
+      total_arg_size += shape[1]
+
+  dtype = [a.dtype for a in args][0]
+
+  for i in range(len(args)):
+    #shape = x.get_shape().as_list()
+    args[i] = tf.reshape(args[i], [batch_size, group_num, -1])
+    args[i] = tf.transpose(args[i], [1, 0, 2])
+
+  # Now the computation.
+  with vs.variable_scope(scope or "Linear"):
+    matrix = vs.get_variable(
+        "Matrix", [group_num, total_arg_size/group_num, output_size/group_num], dtype=dtype)
+    if len(args) == 1:
+      res = math_ops.matmul(args[0], matrix)
+    else:
+      res = math_ops.matmul(array_ops.concat(args, 2), matrix)
+    if shuffle:
+      res = tf.transpose(res, [1, 2, 0])
+    else:
+      res = tf.transpose(res, [1, 0, 2])
+    res = tf.reshape(res, [batch_size, -1])
     if not bias:
       return res
     elif bias_start is None:
