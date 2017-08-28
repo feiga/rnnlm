@@ -81,7 +81,8 @@ flags.DEFINE_bool("use_fp16", False,
                   "Train using 16-bit floats instead of 32bit floats")
 flags.DEFINE_integer("group_num", 1, "Group Number when using Group Recurrent")
 flags.DEFINE_bool("resnet", False, "Add residual connection or not")
-flags.DEFINE_bool("shuffle", True, "Add shuffle unit or not")
+flags.DEFINE_bool("yshuffle", True, "Add shuffle unit or not")
+flags.DEFINE_bool("tshuffle", True, "Add shuffle unit or not")
 flags.DEFINE_bool("vdrop", False, "Using variational dropout or not")
 flags.DEFINE_float("dropout", 0.35, "Dropout rate")
 flags.DEFINE_float("hdropout", 0.35, "Dropout rate")
@@ -131,7 +132,7 @@ class PTBModel(object):
       if FLAGS.group_num == 1:
         return MyLSTMCell(size)
       elif FLAGS.group_num > 1:
-        return GroupLSTMCell(size, FLAGS.group_num, FLAGS.shuffle)
+        return GroupLSTMCell(size, FLAGS.group_num, FLAGS.yshuffle, FLAGS.tshuffle)
       else:
         return None
       #if 'reuse' in inspect.getargspec(

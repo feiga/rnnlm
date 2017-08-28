@@ -77,11 +77,12 @@ class VariationalDropoutWrapper(RNNCell):
 
 class GroupLSTMCell(RNNCell):
     '''Group LSTM cell for experiments'''
-    def __init__(self, num_units, num_groups, is_output_shuffle=False):
+    def __init__(self, num_units, num_groups, is_output_shuffle=False, is_h_shuffle=False):
         self.num_units = num_units
         self.num_groups = num_groups
         self.num_units_per_group = self.num_units / self.num_groups
         self.is_output_shuffle = is_output_shuffle
+        self.is_h_shuffle = is_h_shuffle
 
     @property
     def state_size(self):
@@ -134,9 +135,13 @@ class GroupLSTMCell(RNNCell):
             new_c = tf.reshape(new_c_split, [-1, self.num_units])
             new_h = tf.reshape(new_h_split, [-1, self.num_units])
             output = new_h
-            if self.is_output_shuffle:
+            if self.is_output_shuffle or self.is_h_shuffle:
                 # batch_size x hidden_size x group_size
                 output_split = tf.transpose(new_h_split, perm=[0, 2, 1])
-                output = tf.reshape(output_split, [-1, self.num_units])
+                shuffle_output = tf.reshape(output_split, [-1, self.num_units])
+                if self.is_h_shuffle:
+                    new_h = shuffle_output
+                if self.is_output_shuffle:
+                    output = shuffle_output
 
             return output, LSTMStateTuple(new_c, new_h)
